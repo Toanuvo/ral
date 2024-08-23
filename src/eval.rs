@@ -9,7 +9,7 @@ use crate::ops::*;
 use crate::verb::*;
 
 use crate::{Adverb, Array, Func, Part, Conj, PrimConj, PseudoChar, SpellIn, Val, Verb, PrimVerb};
-use super::ALError;
+use super::{ALError, Env};
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,9 +43,9 @@ impl Token {
 }
 
 
-pub fn eval(mut words: Vec<&str>, mut env: &mut HashMap<String, Val>) -> Result<(), super::ALError>{
+pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, super::ALError> {
     let mut toks: Vec<Token> = Vec::with_capacity(words.len());
-    if words.is_empty() {return Ok(());}
+    if words.is_empty() {return Ok(None);}
 
     while !words.is_empty() || toks.len() > 1 {
         println!("toks {toks:?}");
@@ -57,7 +57,8 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut HashMap<String, Val>) -> Result<
                 let mut rest = rest.to_vec();
                 let v = mem::replace(v, crate::Verb::Prim(PrimVerb::plus));
                 let y = mem::replace(y, Val::Int(-1));
-                let r = eval_mon(v, y);
+
+                let r = eval_mon(v, y)?;
                 rest.insert(0, Noun(r));
                 rest.insert(0, mem::replace(e, Token::Mark));
 
@@ -68,7 +69,7 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut HashMap<String, Val>) -> Result<
                 let mut rest = rest.to_vec();
                 let v = mem::replace(v, crate::Verb::Prim(PrimVerb::plus));
                 let y = mem::replace(y, Val::Int(-1));
-                let r = eval_mon(v, y);
+                let r = eval_mon(v, y)?;
                 rest.insert(0, Noun(r));
                 rest.insert(0, mem::replace(u, Token::Mark));
                 rest.insert(0, mem::replace(e, Token::Mark));
@@ -81,7 +82,7 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut HashMap<String, Val>) -> Result<
                 let x = mem::replace(x, Val::Int(-1));
                 let v = mem::replace(v, crate::Verb::Prim(PrimVerb::plus));
                 let y = mem::replace(y, Val::Int(-1));
-                let r = eval_dyd(v, x, y);
+                let r = eval_dyd(v, x, y)?;
                 rest.insert(0, Noun(r));
                 rest.insert(0, mem::replace(e, Token::Mark));
 
@@ -156,7 +157,7 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut HashMap<String, Val>) -> Result<
                     y => panic!("not cavn: {y:?}"),
                 };
                 let s = mem::replace(s, String::new());
-                env.insert( s, y);
+                env.names.insert( s, y);
                 rest
             },
             [Lpar, v, Rpar, any@..] => {
@@ -200,7 +201,7 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut HashMap<String, Val>) -> Result<
             },
         };
     }
-    Ok(())
+    Ok(None)
 }
 
 /*
@@ -218,7 +219,7 @@ LPAR,      CAVN,      RPAR, ANY,       punc,    ..., 0,2, ...,
 
 //fn eval_match(a: &mut Token, b: &mut Token, c: &mut Token, d: &mut Token) -> (usize, usize) { }
 
-fn move_words(words: &mut Vec<&str>, env: &mut HashMap<String, Val>, asgn: bool) -> Result<Token, ALError> {
+fn move_words(words: &mut Vec<&str>, env: &mut Env, asgn: bool) -> Result<Token, ALError> {
     let w = words.pop().unwrap();
     let wb = w.as_bytes();
 
@@ -243,7 +244,7 @@ fn move_words(words: &mut Vec<&str>, env: &mut HashMap<String, Val>, asgn: bool)
         match wb[0] {
             b'a'..=b'z' | b'A'..=b'Z' =>  {
                 let s = String::from_utf8(wb.to_vec()).expect("not utf8");
-                if let Some(y) = env.get(&s) {
+                if let Some(y) = env.names.get(&s) {
                     Ok(match y.clone() {
                         Val::ValFunc(y) => match y {
                             Func::A(y) => Token::Adv(y),
@@ -261,6 +262,7 @@ fn move_words(words: &mut Vec<&str>, env: &mut HashMap<String, Val>, asgn: bool)
                 data: wb[1..wb.len()-1].to_vec(),
                 shape: vec![(wb.len() - 2) as u32],
             }))),
+            b'`' => Ok(Token::Noun(Val::Sym(env.syms.get_or_intern(String::from_utf8(wb[1..].to_vec()).expect("not utf8"))))),
             b'_' | b'0'..=b'9' => Ok(Token::Noun(parse_nums(w, words))),
             _ => panic!("unhandled: {w:?}")
         }

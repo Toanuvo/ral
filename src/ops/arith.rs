@@ -1,5 +1,6 @@
 
 
+use super::super::ALError;
 use itertools::Itertools;
 use std::ops::*;
 
@@ -43,7 +44,7 @@ macro_rules! impl_op {
     type Output = Val;
     fn $fn(self, rhs: Self) -> Self::Output {
         use Val::*;
-        return match (self, rhs) {
+        match (self, rhs) {
              (Int(x), Int(y)) => Int($name::$fn(x, y)),
              (Int(x), Float(y)) => Float((x as f64).$fn(y)),
              (Float(x), Int(y)) => Float(x.$fn(y as f64)),
@@ -63,7 +64,7 @@ macro_rules! impl_op {
         (IntArr(x), FloatArr(y)) => FloatArr(Array::<f64>::from(x).$fn(y)),
         (FloatArr(x), IntArr(y)) => FloatArr(x.$fn(Array::<f64>::from(y))),
         (x, y) => unreachable!("nyi: {:?} op {:?}", x, y),
-        };
+        }
         }
         })+
     };

@@ -1,9 +1,13 @@
 //#![feature(trace_macros)]
-use itertools::Itertools;
+use itertools::{Format, Itertools};
 use num::{abs, cast::AsPrimitive, traits::ops::overflowing::OverflowingMul, PrimInt};
-use std::{ops::*, process::{id, Output}, usize, vec::IntoIter};
+use string_interner::{backend::{BucketBackend, StringBackend}, StringInterner};
+use core::fmt;
+use std::{any::TypeId, fmt::{Display, Write}, ops::*, process::{id, Output}, vec::IntoIter};
 
-use crate::{eval::Token, verb::Verb, Adverb, Conj, PrimConj};
+type Symbol = string_interner::DefaultSymbol;
+
+use crate::{eval::Token, verb::Verb, ALError, Adverb, Conj, PrimConj};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Func {
@@ -12,16 +16,30 @@ pub enum Func {
     C(Conj),
 }
 
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Val {
     Int(i64),
     Float(f64),
+    Sym(Symbol),
     AsciiArr(Array<u8>),
     IntArr(Array<i64>),
     FloatArr(Array<f64>),
     ValArr(Array<Val>),
     ValFunc(Func),
     Unit(Box<Val>),
+    SymArr(Array<Symbol>),
+}
+
+impl TryFrom<Array<u8>> for String {
+    type Error = ALError;
+    fn try_from(Array { data, shape }: Array<u8>) -> Result<Self, Self::Error>{
+        if shape.len() > 1 {
+            Err(ALError::Shape(format!("cannot make string from rank {:?} Array", shape.len())))
+        } else {
+            String::from_utf8(data).map_err(|e| ALError::Type(format!("invalid utf8: {e}")))
+        }
+    }
 }
 
 
@@ -44,6 +62,11 @@ impl From<Array<f64>> for Val {
 impl From<Array<i64>> for Val {
     fn from(y: Array<i64>) -> Self { Val::IntArr(y) }
 }
+
+impl From<Array<u8>> for Val {
+    fn from(y: Array<u8>) -> Self { Val::AsciiArr(y) }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Array<T> {
@@ -69,8 +92,8 @@ impl <T> Array<T> {
         else { shape[1..].iter().product::<u32>() as usize };
         &data[idx * step.. (idx + 1) * step]
     }
-
 }
+
 
 
 
@@ -86,6 +109,7 @@ impl <T: Into<Val>> FromIterator<T> for Array<T>
         iter.into_iter().collect::<Vec<T>>().into()
     }
 }
+
 impl From<i64> for Array<f64> {
     fn from(i: i64) -> Self {
         Array {
@@ -141,4 +165,4 @@ macro_rules! impl_from_arr {
         })+
     };
 }
-impl_from_arr!(f64, i64);
+impl_from_arr!(f64, i64, u8);

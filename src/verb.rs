@@ -96,6 +96,8 @@ impl Conj {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PrimVerb {
+    i_dot,
+    i_col,
     hash,
     hash_col,
     lcrl,
@@ -230,8 +232,7 @@ pub static SpellIn: SpellInArr = {
     a = setup(a, b'}', [1, 1, 0], (Verb(rcrl), Verb(rcrl_dot), Verb(rcrl_col)));
     a = setup(a, b'[', [1, 0, 0], (Verb(lbrak), Null, Null));
     a = setup(a, b']', [1, 0, 0], (Verb(rbrak), Null, Null));
-
-
+    a = setup(a, b'i', [1, 1, 1], (Null, Verb(i_dot), Verb(i_col)));
 
     a = setup(a, b'&', [0, 1, 1], (Null, Conj(ampr_dot), Conj(ampr_col)));
 

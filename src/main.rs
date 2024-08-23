@@ -1,11 +1,14 @@
 #![allow(unused_variables,unused_imports)]
 
+use string_interner::{backend::{BucketBackend, StringBackend}, StringInterner};
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result};
+use colored::Colorize;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 use std::io::{stderr, Write};
 use std::{iter::Zip, ops::Add, slice::Iter, vec};
+
 
 use std::{io, ops::*};
 use eval::eval;
@@ -55,7 +58,10 @@ fn repl() -> Result<()> {
     let inp = io::stdin();
     let oerr = io::stderr();
     let mut buf = String::new();
-    let mut env: HashMap<String, Val> = HashMap::new();
+    let mut env = Env{
+        names: HashMap::new(),
+        syms: StringInterner::<BucketBackend>::new(),
+    };
     let mut rl = DefaultEditor::new()?;
 
     #[cfg(feature = "with-file-history")]
@@ -63,12 +69,19 @@ fn repl() -> Result<()> {
         println!("No previous history.");
     }
 
+let a = "         ⎡1";
+let b = "[1 2 3 = ⎢2";
+let c = "         ⎣3";
+println!("{a}\n{b}\n{c}");
+    println!("{:x?}", '⎡');
+
     loop {
         let readline = rl.readline("\x1b[48;5;46m \x1b[0m");
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
                 let words = lex(&line);
+                println!("{words:?}");
                 if let Err(e) = eval(words, &mut env) {
                     eprintln!("err: {e:?}");
                 }
@@ -93,10 +106,30 @@ fn repl() -> Result<()> {
     Ok(())
 }
 
+pub struct Env {
+    pub names: HashMap<String, Val>,
+    pub syms: StringInterner<BucketBackend>,
+}
 
+/*
+[│┃┏[]⎡1
 
-#[derive(Debug, Clone, PartialEq)]
+		 ⎡1
+[1 2 3 = ⎢2
+         ⎣3
+*/
+
+#[derive(Debug)]
 pub enum ALError {
     Syntax,
     Value(String),
+    Type(String),
+    Shape(String),
+    IO(io::Error),
+}
+
+impl From<io::Error> for ALError {
+    fn from(v: io::Error) -> Self {
+        Self::IO(v)
+    }
 }

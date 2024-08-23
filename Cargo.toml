@@ -9,5 +9,7 @@ edition = "2021"
 itertools = "0.13.0"
 num = "0.4.3"
 rustyline = "14.0.0"
+string-interner = "0.17.0"
+colored = "2.1.0"
 
 #![warn(unused_imports)]

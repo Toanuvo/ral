@@ -301,13 +301,13 @@ impl Length for Val {
         use Val::*;
         match y {
             IntArr(Array { data: _, shape }) | 
+            AsciiArr(Array { data: _, shape }) | 
             FloatArr(Array { data: _, shape }) => Int(shape[0] as i64),
             Int(_) | Float(_) => Int(1),
             _ => panic!("nyi"),
         }
     }
 }
-
 
 pub trait Rank {
     fn rank(x: &Val) -> Val {
