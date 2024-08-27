@@ -1,7 +1,8 @@
 
 
-use std::{any::TypeId, borrow::BorrowMut, collections::HashMap, f64, fmt::Debug, iter::{self, Once}, mem, ops::DerefMut, os::linux::fs::MetadataExt, str::FromStr};
+use std::{any::TypeId, borrow::BorrowMut, collections::HashMap, f64, fmt::{Debug, Display, Pointer}, iter::{self, Once}, mem, ops::DerefMut, os::linux::fs::MetadataExt,  str::FromStr};
 use std::ops::*;
+use itertools::Itertools;
 use num::Float;
 
 use crate::value::*;
@@ -23,6 +24,20 @@ pub enum Token {
     Lpar,
     Rpar,
     Asgn,
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Token::*;
+        use std::fmt::Display as Dsp;
+        use std::fmt::Debug as Dbg;
+        match self {
+            Ident(s) => f.write_str(s),
+            Noun(n) => Dsp::fmt(n, f),
+            y => Dbg::fmt(y, f),
+        }
+        
+    }
 }
 
 impl Token {
@@ -48,7 +63,7 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
     if words.is_empty() {return Ok(None);}
 
     while !words.is_empty() || toks.len() > 1 {
-        println!("toks {toks:?}");
+        println!("toks: [{}]",  toks.iter().format(", "));
         use Token::*;
 
         toks = match toks.as_mut_slice() {
@@ -131,8 +146,8 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
                 }));
 
                 rest.insert(0, mem::replace(e, Token::Mark));
-                println!("rest: {rest:?}");
-                println!("w: {words:?}");
+                //println!("rest: {rest:?}");
+                //println!("w: {words:?}");
                 rest
             },
             [e, f, g, h, rest@..] if e.edge() && f.cavn() && g.cavn() && h.cavn() => {
@@ -165,7 +180,6 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
                 let mut restv = any.to_vec();
                 //restv.rotate_left(mid)
                 restv.insert(0, mem::replace(v, Token::Mark));
-                println!("restv: {restv:?}");
                 restv
             },
             //m => unreachable!("bad match: {m:?}"),
@@ -174,7 +188,7 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
             //restv
             //},
             [y] | [Mark, y] if words.is_empty() => {
-                println!("result: {y:?}");
+                println!("result: {y}");
                 break;
             },
             rest if !words.is_empty() => {
@@ -259,7 +273,7 @@ fn move_words(words: &mut Vec<&str>, env: &mut Env, asgn: bool) -> Result<Token,
 
             },
             b'\'' => Ok(Token::Noun(Val::AsciiArr(Array {
-                data: wb[1..wb.len()-1].to_vec(),
+                data: wb[1..wb.len()-1].into_iter().map(|c| *c as char).collect_vec(),
                 shape: vec![(wb.len() - 2) as u32],
             }))),
             b'`' => Ok(Token::Noun(Val::Sym(env.syms.get_or_intern(String::from_utf8(wb[1..].to_vec()).expect("not utf8"))))),

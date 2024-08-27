@@ -5,7 +5,7 @@ use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result};
 use colored::Colorize;
 
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug, io::stdout, os::fd::AsRawFd};
 use std::io::{stderr, Write};
 use std::{iter::Zip, ops::Add, slice::Iter, vec};
 
@@ -18,6 +18,8 @@ use verb::*;
 use crate::lexer::lex;
 use crate::verb::PrimVerb;
 use itertools::Itertools;
+
+use nix::{ioctl_read, ioctl_read_bad, libc::{termios, termios2, winsize, TIOCGWINSZ}, sys};
 
 mod value;
 mod verb;
@@ -64,16 +66,9 @@ fn repl() -> Result<()> {
     };
     let mut rl = DefaultEditor::new()?;
 
-    #[cfg(feature = "with-file-history")]
     if rl.load_history("history.txt").is_err() {
         println!("No previous history.");
     }
-
-let a = "         ⎡1";
-let b = "[1 2 3 = ⎢2";
-let c = "         ⎣3";
-println!("{a}\n{b}\n{c}");
-    println!("{:x?}", '⎡');
 
     loop {
         let readline = rl.readline("\x1b[48;5;46m \x1b[0m");
@@ -100,9 +95,8 @@ println!("{a}\n{b}\n{c}");
             }
         }
     }
-
-    #[cfg(feature = "with-file-history")]
     rl.save_history("history.txt");
+
     Ok(())
 }
 
@@ -114,10 +108,12 @@ pub struct Env {
 /*
 [│┃┏[]⎡1
 
-		 ⎡1
+⎡1
 [1 2 3 = ⎢2
-         ⎣3
+⎣3
 */
+
+ioctl_read_bad!(termsize, TIOCGWINSZ, winsize);
 
 #[derive(Debug)]
 pub enum ALError {

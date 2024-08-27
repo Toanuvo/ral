@@ -1,5 +1,7 @@
 use std::{env, fs, io::Read, os};
 
+use itertools::Itertools;
+
 use crate::{ALError, Array, Func, Val, Verb};
 
 
@@ -14,7 +16,7 @@ impl IoOps for Val {
             let mut buf = String::new();
             let str: String = s.try_into()?;
             fs::File::open(str)?.read_to_string(&mut buf)?;
-            Ok(Array::from(buf.into_bytes()).into())
+            Ok(Array::from(buf.chars().collect_vec()).into())
         } else {
             Err(ALError::Type(format!("val not stringable: {y:?}")))
         }
