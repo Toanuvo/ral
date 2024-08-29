@@ -2,10 +2,10 @@
 
 use string_interner::{backend::{BucketBackend, StringBackend}, StringInterner};
 use rustyline::error::ReadlineError;
-use rustyline::{DefaultEditor, Result};
+use rustyline::{DefaultEditor};
 use colored::Colorize;
 
-use std::{collections::HashMap, fmt::Debug, io::stdout, os::fd::AsRawFd};
+use std::{collections::HashMap, fmt::Debug, io::stdout, os::fd::AsRawFd, result};
 use std::io::{stderr, Write};
 use std::{iter::Zip, ops::Add, slice::Iter, vec};
 
@@ -56,7 +56,7 @@ fn main() {
     repl().expect("");
 }
 
-fn repl() -> Result<()> {
+fn repl() -> rustyline::Result<()> {
     let inp = io::stdin();
     let oerr = io::stderr();
     let mut buf = String::new();
@@ -76,9 +76,11 @@ fn repl() -> Result<()> {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
                 let words = lex(&line);
-                println!("{words:?}");
-                if let Err(e) = eval(words, &mut env) {
-                    eprintln!("err: {e:?}");
+                println!("lex: {words:?}");
+                match  eval(words, &mut env){
+                    Err(e) => eprintln!("err: {e:?}"),
+                    Ok(Some(v)) => println!("res: {v}"),
+                    _ => {},
                 }
             },
             Err(ReadlineError::Interrupted) => {
@@ -123,6 +125,21 @@ pub enum ALError {
     Shape(String),
     IO(io::Error),
 }
+
+impl ALError {
+    fn as_Type<T>(msg: &str) -> Result<T> {
+        Err(ALError::Type(String::from(msg)))
+    }
+    fn as_Value<T, S: ToString>(msg: S) -> Result<T> {
+        Err(ALError::Type(msg.to_string()))
+    }
+    fn as_Shape<T, S: ToString>(msg: S) -> Result<T> {
+        Err(ALError::Shape(msg.to_string()))
+    }
+}
+
+
+type Result<T> = result::Result<T, ALError>;
 
 impl From<io::Error> for ALError {
     fn from(v: io::Error) -> Self {

@@ -1,6 +1,6 @@
 
 
-use std::{any::TypeId, borrow::BorrowMut, collections::HashMap, f64, fmt::{Debug, Display, Pointer}, iter::{self, Once}, mem, ops::DerefMut, os::linux::fs::MetadataExt,  str::FromStr};
+use std::{any::TypeId, borrow::BorrowMut, collections::HashMap, f64, fmt::{Alignment, Debug, Display, Pointer}, iter::{self, Once}, mem, ops::DerefMut, os::linux::fs::MetadataExt,  str::FromStr};
 use std::ops::*;
 use itertools::Itertools;
 use num::Float;
@@ -62,8 +62,9 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
     let mut toks: Vec<Token> = Vec::with_capacity(words.len());
     if words.is_empty() {return Ok(None);}
 
-    while !words.is_empty() || toks.len() > 1 {
+    while !words.is_empty() || toks.len() >= 1 {
         println!("toks: [{}]",  toks.iter().format(", "));
+        //println!("words: {words:?}");
         use Token::*;
 
         toks = match toks.as_mut_slice() {
@@ -162,8 +163,10 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
 
             [Ident(s), Asgn, y, rest@..] if y.cavn()  => {
                 println!("asgn");
-                let rest = rest.to_vec();
+                let mut rest = rest.to_vec();
                 let y = mem::replace(y, Token::Mark);
+                // TODO: borrow env
+                rest.insert(0, y.clone()); 
                 let y = match y {
                      Conj(y) => Val::ValFunc(Func::C(y)),
                      Verb(y) => Val::ValFunc(Func::V(y)),
@@ -172,7 +175,8 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
                     y => panic!("not cavn: {y:?}"),
                 };
                 let s = mem::replace(s, String::new());
-                env.names.insert( s, y);
+                
+                env.names.insert( s.clone(), y);
                 rest
             },
             [Lpar, v, Rpar, any@..] => {
@@ -188,8 +192,10 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
             //restv
             //},
             [y] | [Mark, y] if words.is_empty() => {
-                println!("result: {y}");
-                break;
+                return match y {
+                    Noun(y) => Ok(Some(y.clone())),
+                    y => Err(ALError::Value(format!("{y:?}")))
+                };
             },
             rest if !words.is_empty() => {
                 println!("move");
@@ -215,6 +221,9 @@ pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, supe
             },
         };
     }
+
+    println!("end toks: [{}]",  toks.iter().format(", "));
+    println!("end words: {words:?}");
     Ok(None)
 }
 
@@ -297,7 +306,7 @@ fn parse_nums(w: &str, words: &mut Vec<&str>) -> Val {
     }
 
     if count > 0 {
-        let mut nums = words.split_off(count);
+        let mut nums = words.split_off(words.len() - count);
         nums.push(w);
         let nums: Vec<String> = nums.into_iter()
             .map(str::to_string)
@@ -310,18 +319,21 @@ fn parse_nums(w: &str, words: &mut Vec<&str>) -> Val {
             })
             .collect();
 
+        fn parse<T: FromStr + Into<Val>>(nums: Vec<String>) -> Val 
+            where Array<T>: Into<Val> + FromIterator<T>,
+            <T as std::str::FromStr>::Err : std::fmt::Debug
+        {
+            nums.into_iter()
+                .map(|n| n.parse::<T>())
+                .collect::<Result<Array<_>, _>>()
+                .unwrap()
+                .into()
+        }
+
         if floats {
-            nums.into_iter()
-                .map(|n| n.parse::<f64>())
-                .collect::<Result<Array<_>, _>>()
-                .unwrap()
-                .into()
+            parse::<f64>(nums)
         } else {
-            nums.into_iter()
-                .map(|n| n.parse::<i64>())
-                .collect::<Result<Array<_>, _>>()
-                .unwrap()
-                .into()
+            parse::<i64>(nums)
         }
     } else if floats {
         w.parse::<f64>().unwrap().into() 

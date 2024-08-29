@@ -1,10 +1,12 @@
 use core::panic;
-use std::{iter::once, ops::{self, Index, Mul, Range, RangeBounds, ShlAssign}, process::id, usize, vec};
+use std::{fmt::Debug, iter::{once, repeat, zip}, ops::{self, Index, Mul, Range, RangeBounds, ShlAssign}, process::id, usize, vec};
 
-use crate::{Val, Array};
-use itertools::Itertools;
+use crate::{Val, Array, Result, ALError};
+use itertools::{repeat_n, Itertools};
+use nix::libc::group;
 use num::{abs, iter::{self}, Float};
 use Val::*;
+
 
 pub trait Shape {
     fn shape_mon(y: Val) -> Val;
@@ -20,6 +22,10 @@ pub trait Shape {
     //fn curtail(self) -> Self;
     fn select(self, y: Val) -> Self;
     fn pick(self, y: Val) -> Self;
+}
+
+pub trait Select where Self: Sized {
+    fn group(self, y:Self) -> Result<Self>;
 }
 
 fn  index<T: Into<Val> + Clone>(Array { data, shape }: &Array<T>, idx: usize, cells: bool) -> Val 
@@ -155,6 +161,72 @@ where Array<T>: Into<Val>
     } else {
         panic!("nyi")
     }
+}
+
+impl Select for Val {
+    fn group(self, y:Self) -> Result<Self> {
+        match self {
+            Int(x) => {
+                if let Unit(u) = y {
+                     group(
+                        x.into(),
+                        Array { data: vec![*u], shape: vec![1] }
+                    )
+                } else {
+                    ALError::as_Type("y must be an array")
+                }
+            },
+            IntArr(x) => match y {
+                IntArr(a) => group(x, a),
+                FloatArr(a) => group(x, a),
+                AsciiArr(a) => group(x, a),
+                ValArr(a) => group(x, a),
+                Unit(u) => group(x, Array { data: vec![*u], shape: vec![1] }),
+                _ => ALError::as_Type("y must be an array"),
+            }
+            x => ALError::as_Value(format!("cannot group using: {}", x)),
+        }
+    }
+}
+
+fn group<T: Debug + Into<Val> + Clone>(x: Array<i64>, y: Array<T>) -> Result<Val> 
+where Array<T>: Into<Val> 
+{
+    let xs = x.shape;
+    if xs.len() > 1 {
+        panic!("nyi");
+    } else if xs[0] < y.shape[0] {
+        return ALError::as_Shape("group: x len must be equal to y len");
+    }
+    if xs[0] > y.shape[0] { 
+        panic!("nyi");
+    }
+
+    let mut res: Vec<Array<T>> = Vec::new();
+
+    for i  in  0..xs[0] { 
+        let v = y.cell(i as i64);
+        let i = x.data[i as usize];
+        if i != -1 {
+            let i = i as usize;
+            if res.len() <= i {
+                res.resize(i + 1, Array::default());
+            }
+            let a = &mut res[i];
+            a.data.extend_from_slice(v);
+            if y.shape.len() > 1 && a.shape[0] == 0 {
+                a.shape.extend_from_slice(&y.shape[1..]);
+            }
+            a.shape[0] += 1;
+            dbg!(&res);
+        }
+    }
+
+    let res = res.into_iter()
+        .map_into::<Val>()
+        //.map(|v| Val::Unit(Box::new(v)))
+        .collect_vec();
+    Ok(Array::from(res).into())
 }
 
 impl Shape for Val {

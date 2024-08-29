@@ -1,7 +1,7 @@
 //#![feature(trace_macros)]
 use itertools::{intersperse, Format, Itertools};
 use nix::NixPath;
-use num::{abs, cast::AsPrimitive, range_step, traits::ops::overflowing::OverflowingMul, PrimInt};
+use num::{abs, cast::AsPrimitive, range_step, traits::{ops::overflowing::OverflowingMul, SaturatingSub}, PrimInt, Saturating};
 use rustyline::{line_buffer::WordAction, Word};
 use string_interner::{backend::{BucketBackend, StringBackend}, StringInterner};
 use core::fmt;
@@ -53,6 +53,11 @@ impl From<i64> for Val {
     fn from(y: i64) -> Self { Val::Int(y) }
 }
 
+impl From<char> for Val {
+    // todo char val?
+    fn from(y: char) -> Self { Val::Int(y as i64) }
+}
+
 impl From<f64> for Val {
     fn from(y: f64) -> Self { Val::Float(y) }
 }
@@ -69,11 +74,20 @@ impl From<Array<char>> for Val {
     fn from(y: Array<char>) -> Self { Val::AsciiArr(y) }
 }
 
+impl From<Array<Val>> for Val {
+    fn from(y: Array<Val>) -> Self { Val::ValArr(y) }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Array<T> {
     pub data: Vec<T>,
     pub shape: Vec<u32>,
+}
+
+impl <T> Default for Array<T> {
+    fn default() -> Self {
+        Array { data: vec![], shape: vec![0] }
+    }
 }
 
 impl <T> Array<T> {
@@ -102,6 +116,7 @@ impl fmt::Display for Val {
         match self {
             Unit(y) => f.write_fmt(format_args!("<{}>", y)),
             IntArr(y) => f.write_fmt(format_args!("{}", y)),
+            ValArr(y) => f.write_fmt(format_args!("{}", y)),
             FloatArr(y) => f.write_fmt(format_args!("{}", y)),
             AsciiArr(y) => {
                 if y.shape.len() == 1 {
@@ -209,20 +224,21 @@ impl <T: Display> fmt::Display for Array<T> {
                 */
 
                 index.push(0);
-                for i in (a_len - trailing_items)..a_len - 1 {
+                let last = a_len.saturating_sub(1);
+                for i in a_len.saturating_sub(trailing_items)..last {
                     *index.last_mut().unwrap() = i;
                     // _extendLine_pretty?
                     let word = recur(arr, f, index, next_hanging_indent.clone(), next_width).unwrap();
                     extend_line(&mut s, &mut line, word, elem_width, hanging_indent.clone());
                     line.push_str(separator);
                 }
-                *index.last_mut().unwrap() = a_len - 1;
-
-                let word = recur(arr, f, index, next_hanging_indent.clone(), next_width).unwrap();
-                extend_line(&mut s, &mut line, word, elem_width, hanging_indent.clone());
+                if a_len != 0 {
+                    *index.last_mut().unwrap() = last;
+                    let word = recur(arr, f, index, next_hanging_indent.clone(), next_width).unwrap();
+                    extend_line(&mut s, &mut line, word, elem_width, hanging_indent.clone());
+                }
                 s.push_str(&line);
                 index.pop();
-
             } else {
                 let line_sep = format!("{}{}", separator, "\n".repeat(axes_left - 1));
                 for i in 0..leading_items {
@@ -258,7 +274,7 @@ impl <T: Display> fmt::Display for Array<T> {
                 */
 
                 index.push(0);
-                let nested = ((a_len - trailing_items)..a_len).map(|i| {
+                let nested = ((a_len.saturating_sub(trailing_items))..a_len).map(|i| {
                     *index.last_mut().unwrap() = i;
                     let mut nested = recur(arr, f, index, next_hanging_indent.clone(), next_width).unwrap();
                     nested.insert_str(0, &hanging_indent);
@@ -380,4 +396,4 @@ macro_rules! impl_from_arr {
         })+
     };
 }
-impl_from_arr!(f64, i64, char);
+impl_from_arr!(f64, i64, char, Val);

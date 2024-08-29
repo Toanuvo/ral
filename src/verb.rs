@@ -117,6 +117,9 @@ pub enum PrimVerb {
     larr,
     rarr,
     equal,
+    semi,
+    semi_dot,
+    semi_col,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -238,6 +241,7 @@ pub static SpellIn: SpellInArr = {
 
     a = setup(a, b'/', [1, 0, 0], (Adv(slsh), Null, Null));
 
+    a = setup(a, b';', [1, 1, 1], (Verb(semi), Verb(semi_dot), Verb(semi_col)));
     a = setup(a, b'=', [1, 0, 1], (Verb(equal), Null, Asgn));
     a = setup(a, b'(', [1, 0, 0], (Lpar, Null, Null));
     a = setup(a, b')', [1, 0, 0], (Rpar, Null, Null));

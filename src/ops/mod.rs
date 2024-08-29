@@ -61,6 +61,7 @@ pub fn eval_dyd(v: Verb, x: Val, y: Val) -> Result<Val, ALError> {
             p@(plus | pcnt | star | dash | larr | rarr) => eval_arith(p, x, y)?,
             lbrak => x,
             rbrak => y,
+            semi_dot => x.group(y)?,
             _ => panic!("nyi"),
         },
         Verb::Conj { u, p, v } => match p {
