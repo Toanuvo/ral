@@ -5,7 +5,9 @@ use num::{abs, cast::AsPrimitive, range_step, traits::{ops::overflowing::Overflo
 use rustyline::{line_buffer::WordAction, Word};
 use string_interner::{backend::{BucketBackend, StringBackend}, StringInterner};
 use core::fmt;
-use std::{any::TypeId, fmt::{Debug, Display, Write}, isize, ops::{self, *}, process::{id, Output}, usize, vec::IntoIter};
+use std::{any::TypeId, fmt::{Debug, Display, Write}, isize, marker::PhantomData, ops::{self, *}, os::unix::fs::OpenOptionsExt, process::{id, Output}, u32, usize, vec::IntoIter};
+use std::mem::{Discriminant, discriminant};
+use colored::Colorize;
 
 type Symbol = string_interner::DefaultSymbol;
 
@@ -24,7 +26,9 @@ pub enum Val {
     Int(i64),
     Float(f64),
     Sym(Symbol),
-    AsciiArr(Array<char>),
+    AsciiArr(Array<u8>),
+    Utf16Arr(Array<u16>),
+    Utf32Arr(Array<u32>),
     IntArr(Array<i64>),
     FloatArr(Array<f64>),
     ValArr(Array<Val>),
@@ -33,46 +37,168 @@ pub enum Val {
     SymArr(Array<Symbol>),
 }
 
-impl TryFrom<Array<char>> for String {
+/*
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GenericVal<T: From<Val> + Clone>(mem::Discriminant<Val>, T);
+
+impl <T: Into<Val> + Clone> GenericVal<T> {
+    fn of<G:Into<Val> + Clone>() -> Option<Self> {
+
+        
+    }
+    
+}
+
+impl <T: Into<Val> + Clone, G: Into<Val> + Clone> From<G> for GenericVal<T> {
+    fn from(v: G) -> Self {
+        if type_id::<G>() == type_id::<T>() {
+
+        }
+
+        GenericVal::<T>(mem::discriminant(&v), PhantomData)
+    }
+}
+
+fn type_cast<T: Into<Val> + Clone, G: Into<Val> +Clone>(y: G, t: Discriminant<Val>) -> Option<GenericVal<T>>{
+    if type_id::<T>() == type_id::<G>() {
+        Some(GenericVal(t, y))
+    } else {
+        None
+    }
+    
+}
+
+impl  <T: From<Val> + Clone> TryFrom<Val> for GenericVal<T> {
+    type Error = ();
+    fn try_from(v: Val) -> Result<Self, Self::Error> {
+        use Val::*;
+        match v {
+            Int(y) => Ok(GenericVal(mem::discriminant(&v), y as T),)
+            
+        }
+        
+    }
+    
+}
+*/
+
+#[macro_export()]
+macro_rules! is_arr {
+    ($bind:ident) => {
+        AsciiArr($bind) |
+        IntArr($bind) |
+        FloatArr($bind) |
+        ValArr($bind)
+    };
+}
+
+impl TryFrom<Array<u8>> for String {
     type Error = ALError;
-    fn try_from(Array { data, shape }: Array<char>) -> Result<Self, Self::Error>{
+    fn try_from(Array { data, shape }: Array<u8>) -> Result<Self, Self::Error>{
         if shape.len() > 1 {
             Err(ALError::Shape(format!("cannot make string from rank {:?} Array", shape.len())))
         } else {
-            Ok(data.into_iter().collect())
+            Ok(String::from_utf8(data).unwrap())
         }
     }
 }
 
 
+impl From<Vec<char>> for Val {
+    fn from(y: Vec<char>) -> Self {
+        match y.iter().max() {
+            Some(c) => {
+                let c = c.clone() as u32;
+                if c <= u8::MAX as u32 {
+                    Array {
+                        shape: vec![y.len() as u32],
+                        data: y.into_iter().map(|c| c as u8).collect_vec(),
+                    }.into()
+                } else if c <= u16::MAX as u32 {
+                    Array {
+                        shape: vec![y.len() as u32],
+                        data: y.into_iter().map(|c| c as u16).collect_vec(),
+                    }.into()
+                } else {
+                    Array {
+                        shape: vec![y.len() as u32],
+                        data: y.into_iter().map(|c| c as u32).collect_vec(),
+                    }.into()
+                }
+            },
+            None => Array::<u8>::default().into(),
+        }
+    }
+}
+
 impl From<Box<Val>> for Val {
     fn from(y: Box<Val>) -> Self { Val::Unit(y) }
 }
 
-impl From<i64> for Val {
-    fn from(y: i64) -> Self { Val::Int(y) }
+macro_rules! impl_conv {
+    ($($tag:ident-$tp:ty);+) => {
+$(
+        impl From<$tp> for Val {
+        fn from(y: $tp) -> Self { Val::$tag(y) }
+        }
+        impl TryFrom<Val> for $tp {
+        type Error = ();
+        fn try_from(v: Val) -> Result<Self, Self::Error> {
+        if let Val::$tag(y) = v {
+        Ok(y)
+        } else {
+        Err(())
+        }
+        }
+        }
+)+
+    };
 }
+
+impl_conv!(
+    Int-i64;
+    Float-f64;
+    AsciiArr-Array<u8>;
+    IntArr-Array<i64>;
+    FloatArr-Array<f64>
+);
 
 impl From<char> for Val {
     // todo char val?
     fn from(y: char) -> Self { Val::Int(y as i64) }
 }
 
-impl From<f64> for Val {
-    fn from(y: f64) -> Self { Val::Float(y) }
+impl From<u8> for Val {
+    // todo char val?
+    fn from(y: u8) -> Self { Val::Int(y as i64) }
 }
 
-impl From<Array<f64>> for Val {
-    fn from(y: Array<f64>) -> Self { Val::FloatArr(y) }
+impl TryFrom<Val> for u8 {
+    // todo char val?
+    type Error = ();
+    fn try_from(v: Val) -> Result<Self, Self::Error> {
+        if let Val::Int(y) = v {
+            u8::try_from(y).map_err(|_|())
+        } else {
+            Err(())
+        }
+    }
 }
 
-impl From<Array<i64>> for Val {
-    fn from(y: Array<i64>) -> Self { Val::IntArr(y) }
+impl From<Array<u16>> for Val {
+    fn from(y: Array<u16>) -> Self { Val::Utf16Arr(y) }
 }
 
+impl From<Array<u32>> for Val {
+    fn from(y: Array<u32>) -> Self { Val::Utf32Arr(y) }
+}
+
+/*
 impl From<Array<char>> for Val {
     fn from(y: Array<char>) -> Self { Val::AsciiArr(y) }
 }
+*/
 
 impl From<Array<Val>> for Val {
     fn from(y: Array<Val>) -> Self { Val::ValArr(y) }
@@ -91,6 +217,14 @@ impl <T> Default for Array<T> {
 }
 
 impl <T> Array<T> {
+    pub fn rank(&self) -> usize {
+        self.shape.len()
+    }
+
+    pub fn is_single(&self) -> bool {
+        self.shape.len() == 1 && self.shape[0] == 1
+    }
+
     pub fn cell(&self, idx: i64) -> &[T] {
         let &Array { data, shape } = &self;
         let l = shape[0] as i64;
@@ -108,19 +242,25 @@ impl <T> Array<T> {
         else { shape[1..].iter().product::<u32>() as usize };
         &data[idx * step.. (idx + 1) * step]
     }
+
+    pub fn cast<G: Into<Val> + From<T>>(self) -> Array<G> {
+        Array { data: self.data.into_iter().map(G::from).collect_vec(), shape: self.shape }
+    }
 }
 
 impl fmt::Display for Val {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Val::*;
         match self {
+            Int(y) => f.write_fmt(format_args!("{}", y)),
             Unit(y) => f.write_fmt(format_args!("<{}>", y)),
             IntArr(y) => f.write_fmt(format_args!("{}", y)),
-            ValArr(y) => f.write_fmt(format_args!("{}", y)),
+            ValArr(y) => f.write_fmt(format_args!("v{}v", y)),
             FloatArr(y) => f.write_fmt(format_args!("{}", y)),
             AsciiArr(y) => {
                 if y.shape.len() == 1 {
-                    let s: String = y.data.clone().into_iter().collect();
+                    let s = std::str::from_utf8(&y.data[..]).unwrap().escape_default();
+                    let s = s.to_string().blue();
                     f.write_fmt(format_args!("\"{s}\""))
                 } else {
                     f.write_fmt(format_args!("{}", y))
@@ -129,7 +269,6 @@ impl fmt::Display for Val {
             y => f.write_fmt(format_args!("{:?}", y)),
         }
     }
-
 }
 
 type Grid<T = char> = Vec<Vec<T>>;
@@ -140,15 +279,6 @@ type Metagrid = Grid<Grid>;
 impl <T: Display> fmt::Display for Array<T> {
 
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for c in 1..self.shape.len()-1  {
-            let (xs, ys) = self.shape.split_at(c);
-            for i in 0..xs[xs.len() - 1] {
-
-            }
-
-
-        }
-
         const summary_insert: &str = "...";
         const edge_items: usize = 3;
         const separator: &str = " ";
@@ -298,6 +428,7 @@ fn extend_line(mut s: &mut String, mut line: &mut String, word: String, line_wid
         if line.len() + w.len() > line_width {
             s.push_str(&line);
             s.push('\n');
+            line.clone_from(&next_line_prefix)
         }
         line.push_str(&word);
     } else {
@@ -396,4 +527,4 @@ macro_rules! impl_from_arr {
         })+
     };
 }
-impl_from_arr!(f64, i64, char, Val);
+impl_from_arr!(f64, i64, u8, u16, u32, Val);

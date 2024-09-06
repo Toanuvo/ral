@@ -10,6 +10,7 @@ use Val::*;
 
 pub trait Shape {
     fn shape_mon(y: Val) -> Val;
+    fn shape_ref(&self) -> &Vec<u32>;
     fn shape_dyd(x: Val, y: Val) -> Val;
 
     fn first(self) -> Self;
@@ -173,7 +174,7 @@ impl Select for Val {
                         Array { data: vec![*u], shape: vec![1] }
                     )
                 } else {
-                    ALError::as_Type("y must be an array")
+                    ALError::as_Type(format!("y must be an array, got x: {x}, y: {y}"))
                 }
             },
             IntArr(x) => match y {
@@ -182,7 +183,7 @@ impl Select for Val {
                 AsciiArr(a) => group(x, a),
                 ValArr(a) => group(x, a),
                 Unit(u) => group(x, Array { data: vec![*u], shape: vec![1] }),
-                _ => ALError::as_Type("y must be an array"),
+                _ => ALError::as_Type(format!("y must be an array, got {y}")),
             }
             x => ALError::as_Value(format!("cannot group using: {}", x)),
         }
@@ -344,9 +345,27 @@ impl Shape for Val {
         panic!("nyii");
     }
 
+    fn shape_ref(&self) -> &Vec<u32> {
+        // is there a better way?
+        static EMPTY_SHAPE: Vec<u32> = Vec::new();
+        match self {
+            IntArr(Array { data: _, shape }) | 
+            AsciiArr(Array { data: _, shape }) | 
+            FloatArr(Array { data: _, shape }) => {
+                shape
+            },
+            Int(_) | Float(_) => {
+                &EMPTY_SHAPE
+            } ,
+            _ => panic!("nyi"),
+        }
+    }
+
     fn shape_mon(y: Val) -> Val {
         match y {
             IntArr(Array { data: _, shape }) | 
+            ValArr(Array { data: _, shape }) | 
+            AsciiArr(Array { data: _, shape }) | 
             FloatArr(Array { data: _, shape }) => {
                 let data = shape.into_iter()
                 .map(|i| i as i64)
@@ -354,7 +373,7 @@ impl Shape for Val {
                 Array { shape: vec![data.len() as u32], data }.into()
             },
             Int(_) | Float(_) => Array { shape: vec![0], data: Vec::<i64>::new() }.into(),
-            _ => panic!("nyi"),
+            _ => panic!("nyi: {y:?}"),
         }
     }
 }

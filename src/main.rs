@@ -1,4 +1,4 @@
-#![allow(unused_variables,unused_imports)]
+#![allow(unused_variables,unused_imports,non_upper_case_globals)]
 
 use string_interner::{backend::{BucketBackend, StringBackend}, StringInterner};
 use rustyline::error::ReadlineError;
@@ -17,7 +17,7 @@ use verb::*;
 
 use crate::lexer::lex;
 use crate::verb::PrimVerb;
-use itertools::Itertools;
+use itertools::{diff_with, Itertools};
 
 use nix::{ioctl_read, ioctl_read_bad, libc::{termios, termios2, winsize, TIOCGWINSZ}, sys};
 
@@ -28,6 +28,8 @@ mod eval;
 mod ops;
 
 fn main() {
+    SPELL_IN_OUT.set(SpellInOut::init()).unwrap();
+
     let x = Val::Int(5);
     let xaf = Val::FloatArr(Array {
         data: vec![1.1, 2.2, 3.3],
@@ -59,7 +61,7 @@ fn main() {
 fn repl() -> rustyline::Result<()> {
     let inp = io::stdin();
     let oerr = io::stderr();
-    let mut buf = String::new();
+    //let mut buf = String::new();
     let mut env = Env{
         names: HashMap::new(),
         syms: StringInterner::<BucketBackend>::new(),
@@ -74,12 +76,12 @@ fn repl() -> rustyline::Result<()> {
         let readline = rl.readline("\x1b[48;5;46m \x1b[0m");
         match readline {
             Ok(line) => {
-                rl.add_history_entry(line.as_str());
+                let _ = rl.add_history_entry(line.as_str());
                 let words = lex(&line);
                 println!("lex: {words:?}");
                 match  eval(words, &mut env){
                     Err(e) => eprintln!("err: {e:?}"),
-                    Ok(Some(v)) => println!("res: {v}"),
+                    Ok(Some(v)) => println!("{v}"),
                     _ => {},
                 }
             },
@@ -127,8 +129,8 @@ pub enum ALError {
 }
 
 impl ALError {
-    fn as_Type<T>(msg: &str) -> Result<T> {
-        Err(ALError::Type(String::from(msg)))
+    fn as_Type<T, S: ToString>(msg:S) -> Result<T> {
+        Err(ALError::Type(msg.to_string()))
     }
     fn as_Value<T, S: ToString>(msg: S) -> Result<T> {
         Err(ALError::Type(msg.to_string()))

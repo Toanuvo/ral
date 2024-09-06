@@ -1,6 +1,6 @@
 
 
-use std::{any::TypeId, borrow::BorrowMut, collections::HashMap, f64, fmt::{Alignment, Debug, Display, Pointer}, iter::{self, Once}, mem, ops::DerefMut, os::linux::fs::MetadataExt,  str::FromStr};
+use std::{any::TypeId, borrow::BorrowMut, collections::HashMap, f64, fmt::{Alignment, Debug, Display, Pointer}, iter::{self, Once}, mem, ops::DerefMut, os::linux::fs::MetadataExt, str::{Chars, FromStr}};
 use std::ops::*;
 use itertools::Itertools;
 use num::Float;
@@ -9,7 +9,7 @@ use crate::value::*;
 use crate::ops::*;
 use crate::verb::*;
 
-use crate::{Adverb, Array, Func, Part, Conj, PrimConj, PseudoChar, SpellIn, Val, Verb, PrimVerb};
+use crate::{Adverb, Array, Func, Part, Conj, PrimConj, PseudoChar, Val, Verb, PrimVerb};
 use super::{ALError, Env};
 
 
@@ -34,6 +34,7 @@ impl Display for Token {
         match self {
             Ident(s) => f.write_str(s),
             Noun(n) => Dsp::fmt(n, f),
+            Verb(v) => Dsp::fmt(v, f),
             y => Dbg::fmt(y, f),
         }
         
@@ -58,7 +59,7 @@ impl Token {
 }
 
 
-pub fn eval(mut words: Vec<&str>, mut env: &mut Env) -> Result<Option<Val>, super::ALError> {
+pub fn eval(mut words: Vec<&str>, env: &mut Env) -> Result<Option<Val>, super::ALError> {
     let mut toks: Vec<Token> = Vec::with_capacity(words.len());
     if words.is_empty() {return Ok(None);}
 
@@ -281,16 +282,51 @@ fn move_words(words: &mut Vec<&str>, env: &mut Env, asgn: bool) -> Result<Token,
                 }
 
             },
-            b'\'' => Ok(Token::Noun(Val::AsciiArr(Array {
-                data: wb[1..wb.len()-1].into_iter().map(|c| *c as char).collect_vec(),
-                shape: vec![(wb.len() - 2) as u32],
-            }))),
+            b'\'' => Ok(Token::Noun({
+                //wb[1..wb.len()-1].into_iter().map(|c| *c as char).collect_vec()
+                parse_escapes(
+                    w.chars()
+                        .dropping(1)
+                        .dropping_back(1))
+                    .unwrap()
+                    .into()
+            })),
             b'`' => Ok(Token::Noun(Val::Sym(env.syms.get_or_intern(String::from_utf8(wb[1..].to_vec()).expect("not utf8"))))),
             b'_' | b'0'..=b'9' => Ok(Token::Noun(parse_nums(w, words))),
             _ => panic!("unhandled: {w:?}")
         }
     }
 }
+
+#[derive(Debug, Clone)]
+enum ParseEscapeError {
+    UnexpectedEscape(char),
+    NYI,
+}
+
+// todo trait method on iterator/chars
+fn parse_escapes<I: Iterator<Item = char>>(mut iter: I) -> Result<Vec<char>, ParseEscapeError> {
+    let mut res = Vec::new();
+    while let Some(c) = iter.next() {
+        if c == '\\' {
+            match iter.next()  {
+                Some('0') => res.push('\0'),
+                Some('\'') => res.push('\''),
+                Some('\\') => res.push('\\'),
+                Some('r') => res.push('\r'),
+                Some('t') => res.push('\t'),
+                Some('n') => res.push('\n'),
+                Some('x' | 'u') => return Err(ParseEscapeError::NYI),
+                Some(c)  => return Err(ParseEscapeError::UnexpectedEscape(c)),
+                None => break,
+            }
+        } else {
+            res.push(c);
+        }
+    } 
+    Ok(res)
+}
+
 
 fn parse_nums(w: &str, words: &mut Vec<&str>) -> Val {
     let mut count = 0;

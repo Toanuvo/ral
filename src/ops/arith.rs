@@ -63,6 +63,7 @@ macro_rules! impl_op {
 
         (IntArr(x), FloatArr(y)) => FloatArr(Array::<f64>::from(x).$fn(y)),
         (FloatArr(x), IntArr(y)) => FloatArr(x.$fn(Array::<f64>::from(y))),
+        (AsciiArr(x), AsciiArr(y)) => IntArr(x.$fn(y).cast::<i64>()),
         (x, y) => unreachable!("nyi: {:?} op {:?}", x, y),
         }
         }
@@ -77,6 +78,7 @@ impl_op!(
     //Div-div;
     Max-max;
     Min-min;
+    Eql-eq;
     GtrEq-ge;
     Gtr-gt;
     Less-lt;
@@ -114,6 +116,23 @@ pub trait Min<Rhs = Self> {
     type Output;
     fn min(self, rhs: Rhs) -> Self::Output;
 }
+
+pub trait Eql<Rhs = Self> {
+    type Output;
+    fn eq(self, rhs: Rhs) -> Self::Output;
+}
+
+impl <T: PartialEq + From<bool>> Eql<T> for T {
+    type Output = Self;
+    fn eq(self, rhs: T) -> Self::Output {
+        if PartialEq::eq(&self, &rhs) {
+            T::from(true)
+        } else {
+            T::from(false)
+        }
+    }
+}
+
 
 macro_rules! impl_base_ops {
     ($($name:ident-$fn:ident);+) => {
@@ -164,6 +183,7 @@ make_arr_ops! {
     Div-div;
     Min-min;
     Max-max;
+    Eql-eq;
     GtrEq-ge;
     Gtr-gt;
     Less-lt;
@@ -175,7 +195,7 @@ macro_rules! impl_arr_ops  {
         $(impl ArrayOps<$tp> for $tp {})+
     };
 }
-impl_arr_ops!(i64, f64);
+impl_arr_ops!(i64, f64, u8, u16, u32);
 
 macro_rules! impl_cust_ops {
     (($($name:ident-$fn:ident);+) $tps:tt) => {
@@ -197,7 +217,7 @@ macro_rules! impl_cust_ops {
 
 impl_cust_ops!(
     (Max-max; Min-min)
-    (i64)
+    (i64, u8, u16, u32)
 );
 
 macro_rules! impl_arr_prim_op {
@@ -233,7 +253,7 @@ macro_rules! impl_arr_op {
                     .iter()
                     .zip(&y.shape)
                     .find_position(|(x, y)| *x != *y);
-                if let Some((rank, _)) = opt {
+                if let Some((rank, (xl, yl))) = opt {
                     //let len = x.shape[0..rank].iter().fold(1, |a, x| a * x);
                     let len_a = x.shape[rank..].iter().fold(1, |a, x| a * x);
                     let len_b = y.shape[rank..].iter().fold(1, |a, x| a * x);
@@ -254,6 +274,7 @@ macro_rules! impl_arr_op {
                             .collect();
                         y.shape = x.shape
                     } else {
+                        dbg!(opt);
                         unreachable!("eql len");
                     }
                 } else {
@@ -268,7 +289,7 @@ macro_rules! impl_arr_op {
             }
         }
 
-        impl_arr_prim_op!($name, $fn, i64, f64);
+        impl_arr_prim_op!($name, $fn, i64, f64, u8, u16, u32);
 
         impl<T: $name<Output = T> + Copy> $name<T> for Array<T> {
             type Output = Self;
@@ -289,6 +310,7 @@ impl_arr_op!(
     Div-div;
     Max-max;
     Min-min;
+    Eql-eq;
     GtrEq-ge;
     Gtr-gt;
     Less-lt;

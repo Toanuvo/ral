@@ -16,7 +16,7 @@ impl IoOps for Val {
             let mut buf = String::new();
             let str: String = s.try_into()?;
             fs::File::open(str)?.read_to_string(&mut buf)?;
-            Ok(Array::from(buf.chars().collect_vec()).into())
+            Ok(buf.chars().collect_vec().into())
         } else {
             Err(ALError::Type(format!("val not stringable: {y:?}")))
         }
