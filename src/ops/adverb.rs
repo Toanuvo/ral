@@ -4,9 +4,9 @@ use std::vec;
 
 use itertools::Itertools;
 
-use crate::{Result, ALError, Array, Func, Val, Verb};
+use crate::{ALError, Array, Func, GenericVal, Result, Val, Verb};
 
-use super::eval_dyd;
+use super::{eval_dyd, Shape};
 
 pub trait Fold where Self: Sized {
     //fn fold_dyd(v: Verb, x: Val, y: Val ) -> Val;
@@ -39,16 +39,17 @@ impl Fold for Val {
     }
 }
 
-pub fn scan<T: Into<Val> + Clone + TryFrom<Val>>(u: Verb, mut y: Array<T>) -> Result<Val> 
+pub fn scan<T: GenericVal + TryFrom<Val>>(u: Verb, mut y: Array<T>) -> Result<Val> 
 where Array<T>: Into<Val> 
 {
     if y.shape[0] == 1{
         Ok(y.into())
+        /*
     } else if y.rank() == 1 {
         let mut accum: Val = y.data[0].clone().into();
         let mut same = true;
         let mut outVal: Vec<Val> = Vec::new();
-        let mut out: Vec<T> = vec![y.data[0].clone()];
+        let mut out: Val = Array { data: vec![y.data[0].clone()] , shape: vec![1]}.into();
 
         for i in 1..y.shape[0] {
             let i = i as usize;
@@ -57,30 +58,32 @@ where Array<T>: Into<Val>
                     accum,
                     y.data[i].clone().into()
                 )?;
-            if same {
-                //let t: std::Result<T, Val> = &accum .try_into();
-            }
-            
-            //out.push(accum.clone());
+
+            out = out.join(accum.clone())?;
         }
-        //Ok(Array::from(out).into())
-        Ok(Array::from(outVal).into())
+        Ok(out)
+*/
     } else {
         let s: Array<T> = Array {
             data: y.cell(0).to_vec(),
-            shape: y.shape[1..].to_vec(),
+            shape: y.cell_shape(),
         };
-        let mut out: Vec<Val> = vec![s.clone().into()];
+
+        let mut out: Val = Array { 
+            data: vec![s.clone().into()],
+            shape: {let mut ys = y.shape.clone(); ys[0] = 1; ys}
+        }.into();
         let mut accum: Val = s.into();
 
         for i in 1..y.shape[0] {
             let i = i as i64;
-            let a: Val = Array {
-                data: y.cell(i-1).to_vec().into(),
-                shape: y.shape[1..].to_vec(),
-            }.into();
+            //let a: Val = Array {
+                //data: y.cell(i-1).to_vec().into(),
+                //shape: y.cell_shape(),
+            //}.into();
+            let a = Val::Int(i).select(y.clone().into());
             accum = eval_dyd( u.clone(), accum, a)?;
-            out.push(accum.clone()); 
+            out = out.join(accum.clone())?;
         }
         Ok(Array::from(out).into())
     }
@@ -88,7 +91,7 @@ where Array<T>: Into<Val>
 }
 
 
-pub fn fold<T: Into<Val>>(u: Verb, mut y: Array<T>) -> Result<Val> 
+pub fn fold<T: GenericVal>(u: Verb, mut y: Array<T>) -> Result<Val> 
 where Array<T>: Into<Val>
 {
     if y.data.len() == 1 {

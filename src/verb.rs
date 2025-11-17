@@ -131,6 +131,7 @@ impl Conj {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrimVerb {
+    comm,
     i_dot,
     i_col,
     h_dot,
@@ -333,6 +334,7 @@ impl SpellInOut {
         use PrimAdv::*;
         use PrimConj::*;
         a.setup(b'+', [1, 0, 0], (Verb(plus), Null, Null));
+        a.setup(b',', [1, 0, 0], (Verb(comm), Null, Null));
         a.setup( b'-', [1, 0, 0], (Verb(dash), Null, Null));
         a.setup( b'*', [1, 0, 0], (Verb(star), Null, Null));
         a.setup( b'%', [1, 0, 0], (Verb(pcnt), Null, Null));

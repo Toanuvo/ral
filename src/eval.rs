@@ -355,7 +355,7 @@ fn parse_nums(w: &str, words: &mut Vec<&str>) -> Val {
             })
             .collect();
 
-        fn parse<T: FromStr + Into<Val>>(nums: Vec<String>) -> Val 
+        fn parse<T: FromStr + GenericVal>(nums: Vec<String>) -> Val 
             where Array<T>: Into<Val> + FromIterator<T>,
             <T as std::str::FromStr>::Err : std::fmt::Debug
         {

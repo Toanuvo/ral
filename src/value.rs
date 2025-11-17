@@ -5,13 +5,13 @@ use num::{abs, cast::AsPrimitive, range_step, traits::{ops::overflowing::Overflo
 use rustyline::{line_buffer::WordAction, Word};
 use string_interner::{backend::{BucketBackend, StringBackend}, StringInterner};
 use core::fmt;
-use std::{any::TypeId, fmt::{Debug, Display, Write}, isize, marker::PhantomData, ops::{self, *}, os::unix::fs::OpenOptionsExt, process::{id, Output}, u32, usize, vec::IntoIter};
+use std::{any::TypeId, collections::VecDeque, fmt::{Debug, Display, Write}, isize, marker::PhantomData, ops::{self, *}, os::unix::fs::OpenOptionsExt, process::{id, Output}, u32, usize, vec::IntoIter};
 use std::mem::{Discriminant, discriminant};
 use colored::Colorize;
 
 type Symbol = string_interner::DefaultSymbol;
 
-use crate::{eval::Token, verb::Verb, ALError, Adverb, Conj, PrimConj};
+use crate::{eval::Token, verb::{self, Verb}, ALError, Adverb, Conj, PrimConj};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Func {
@@ -35,6 +35,39 @@ pub enum Val {
     ValFunc(Func),
     Unit(Box<Val>),
     SymArr(Array<Symbol>),
+}
+
+impl Val {
+    pub fn atom_unit(self) -> Self {
+        use Val::*;
+        match self {
+            Int(y) => unit(y).into(),
+            Float(y) => unit(y).into(),
+            y => y,
+        }
+    }
+}
+
+pub fn unit<T: GenericVal>(y: T) -> Array<T> where Array<T>: Into<Val> {
+    Array {
+        data: vec![y],
+        shape: vec![],
+    }
+}
+
+
+pub enum Atom {
+    Int(i64),
+    Float(f64),
+    Sym(Symbol),
+}
+
+pub enum Arrays {
+    AsciiArr(Array<u8>),
+    Utf16Arr(Array<u16>),
+    Utf32Arr(Array<u32>),
+    IntArr(Array<i64>),
+    FloatArr(Array<f64>),
 }
 
 /*
@@ -143,12 +176,12 @@ $(
         fn from(y: $tp) -> Self { Val::$tag(y) }
         }
         impl TryFrom<Val> for $tp {
-        type Error = ();
-        fn try_from(v: Val) -> Result<Self, Self::Error> {
+        type Error = Val;
+        fn try_from(v: Val) -> Result<Self, Val> {
         if let Val::$tag(y) = v {
         Ok(y)
         } else {
-        Err(())
+        Err(v)
         }
         }
         }
@@ -172,6 +205,22 @@ impl From<char> for Val {
 impl From<u8> for Val {
     // todo char val?
     fn from(y: u8) -> Self { Val::Int(y as i64) }
+}
+
+impl From<u16> for Val {
+    // todo char val?
+    fn from(y: u16) -> Self { Val::Int(y as i64) }
+}
+
+impl From<u32> for Val {
+    // todo char val?
+    fn from(y: u32) -> Self { Val::Int(y as i64) }
+}
+
+impl From<Symbol> for Val {
+    fn from(value: Symbol) -> Self {
+        panic!("nyi symbol -> val");
+    }
 }
 
 impl TryFrom<Val> for u8 {
@@ -205,24 +254,73 @@ impl From<Array<Val>> for Val {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Array<T> {
+pub struct Array<T: GenericVal> {
     pub data: Vec<T>,
     pub shape: Vec<u32>,
 }
 
-impl <T> Default for Array<T> {
+impl <T: GenericVal> Default for Array<T> {
     fn default() -> Self {
         Array { data: vec![], shape: vec![0] }
     }
 }
 
-impl <T> Array<T> {
+pub trait GenericVal: Debug + Clone + Into<Val> { }
+impl <T: Debug + Clone + Into<Val>> GenericVal for T { }
+
+impl <T: GenericVal> Array<T> {
+    pub fn join(mut self, mut y: Self) -> Result<Self, ALError> {
+        dbg!(&self, &y);
+        if self.shape[1..].eq(&y.shape[1..]) {
+            self.data.append(&mut y.data);
+            self.shape[0] += y.shape[0];
+            Ok(self)
+        } else if self.shape == y.shape[1..] {
+            self.data.append(&mut y.data);
+            y.shape[0] += 1;
+            self.shape = y.shape;
+            Ok(self)
+        } else if self.shape[1..].eq(&y.shape) {
+            self.data.append(&mut y.data);
+            self.shape[0] += 1;
+            Ok(self)
+        } else {
+            ALError::as_Shape(format!("cannot join mismatched shapes: {:?}  {:?}", self.shape, y.shape))
+        }
+    }
+
+    pub fn couple(mut self, mut y: Array<T>) -> Result<Self, ALError> {
+        if self.shape != y.shape {
+            ALError::as_Shape(format!("couple args must have same shape: xs: {:?}, ys: {:?}", self.shape, y.shape))
+        } else {
+            self.data.append(&mut y.data);
+            self.shape.insert(0, 2);
+            Ok(self)
+        }
+    }
+
+    pub fn push(&mut self, y: T) {
+        if self.rank() == 1 {
+            self.data.push(y)
+        } else {
+            panic!("push to non rank 1")
+        }
+    }
+
     pub fn rank(&self) -> usize {
         self.shape.len()
     }
 
     pub fn is_single(&self) -> bool {
         self.shape.len() == 1 && self.shape[0] == 1
+    }
+
+    pub fn cell_shape(&self) -> Vec<u32> {
+        if let [_, rest@..] = &self.shape[..] {
+            rest.to_vec()
+        } else {
+            vec![]
+        }
     }
 
     pub fn cell(&self, idx: i64) -> &[T] {
@@ -243,8 +341,12 @@ impl <T> Array<T> {
         &data[idx * step.. (idx + 1) * step]
     }
 
-    pub fn cast<G: Into<Val> + From<T>>(self) -> Array<G> {
+    pub fn cast<G: GenericVal + From<T>>(self) -> Array<G> {
         Array { data: self.data.into_iter().map(G::from).collect_vec(), shape: self.shape }
+    }
+
+    pub fn pair(x: T, y: T) -> Self {
+        Array { data: vec![x, y], shape: vec![2] }
     }
 }
 
@@ -269,15 +371,16 @@ impl fmt::Display for Val {
             y => f.write_fmt(format_args!("{:?}", y)),
         }
     }
+
 }
+
 
 type Grid<T = char> = Vec<Vec<T>>;
 type Metagrid = Grid<Grid>;
 //let mut sz: winsize = winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
 //let ok = unsafe { termsize(stdout().as_raw_fd(), &mut sz) };
 
-impl <T: Display> fmt::Display for Array<T> {
-
+impl <T: Display + GenericVal> fmt::Display for Array<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const summary_insert: &str = "...";
         const edge_items: usize = 3;
@@ -286,7 +389,7 @@ impl <T: Display> fmt::Display for Array<T> {
 
         let mut idx: Vec<_> = Vec::new();
         
-        fn recur<T: Display>(arr: &Array<T>, f: & mut fmt::Formatter<'_>, index: &mut Vec<usize>, hanging_indent: String, curr_width: usize) -> Result<String, fmt::Error> {
+        fn recur<T: Display + GenericVal>(arr: &Array<T>, f: & mut fmt::Formatter<'_>, index: &mut Vec<usize>, hanging_indent: String, curr_width: usize) -> Result<String, fmt::Error> {
             let axis = index.len();
             let axes_left = arr.shape.len() - axis;
 
@@ -422,7 +525,7 @@ impl <T: Display> fmt::Display for Array<T> {
     }
 }
 
-fn extend_line(mut s: &mut String, mut line: &mut String, word: String, line_width: usize, next_line_prefix: String) {
+fn extend_line(s: &mut String, line: &mut String, word: String, line_width: usize, next_line_prefix: String) {
     let words = word.lines().collect_vec();
     if let [w] = words[..]  {
         if line.len() + w.len() > line_width {
@@ -464,7 +567,7 @@ pub enum ValueError {
     Conversion,
 }
 
-impl <T: Into<Val>> FromIterator<T> for Array<T>
+impl <T: GenericVal> FromIterator<T> for Array<T>
     where Array<T>: From<Vec<T>>
 {
     fn from_iter<IT: IntoIterator<Item = T>>(iter: IT) -> Self {
@@ -490,7 +593,7 @@ impl From<Array<i64>> for Array<f64> {
     }
 }
 
-impl<T> IntoIterator for Array<T> {
+impl <T: GenericVal> IntoIterator for Array<T> {
     type Item = T;
     type IntoIter = IntoIter<Self::Item>;
     fn into_iter(self) -> Self::IntoIter {

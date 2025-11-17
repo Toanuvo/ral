@@ -4,7 +4,7 @@ use super::super::ALError;
 use itertools::Itertools;
 use std::ops::*;
 
-use crate::{Array, Val};
+use crate::{Array, GenericVal, Val};
 pub trait Til {
     fn til_mon(y: Val) -> Val;
     fn til_dyd(x: Val, y: Val) -> Val;
@@ -45,6 +45,9 @@ macro_rules! impl_op {
     fn $fn(self, rhs: Self) -> Self::Output {
         use Val::*;
         match (self, rhs) {
+            
+             (Unit(x), y) => $name::$fn(*x, y),
+             (x, Unit(y)) => $name::$fn(x, *y),
              (Int(x), Int(y)) => Int($name::$fn(x, y)),
              (Int(x), Float(y)) => Float((x as f64).$fn(y)),
              (Float(x), Int(y)) => Float(x.$fn(y as f64)),
@@ -168,7 +171,7 @@ macro_rules! make_arr_ops  {
     ($($name:ident-$fn:ident);+) => {
         pub trait ArrayOps<T>:
         $($name<Array<T>, Output = Array<T>> +)+
-        where T:
+        where T: GenericVal +
         $($name<Array<T>, Output = Array<T>> +)+
         {
             $(fn $fn(x: T, y: Array<T>) -> Array<T> { T::$fn(x, y) })+
@@ -240,7 +243,7 @@ macro_rules! impl_arr_prim_op {
 
 macro_rules! impl_arr_op {
     ( $($name:ident-$fn:ident);+) => {
-        $( impl<T: $name<T, Output = T> + std::fmt::Debug + ArrayOps<T>> $name<Array<T>> for Array<T>
+        $( impl<T: $name<T, Output = T> + GenericVal + Copy + ArrayOps<T>> $name<Array<T>> for Array<T>
         where
             for<'a> Array<T>: From<T> + From<&'a [T]>,
         {
@@ -270,7 +273,8 @@ macro_rules! impl_arr_op {
                             .chunks_exact(len_a as usize)
                             .into_iter()
                             .zip(y.data.into_iter())
-                            .flat_map(|(xc, yv)| Array::<T>::$fn(xc.into(), yv.into()))
+                            .flat_map(|(xc, yv)| $name::<T>::$fn(Array::<T>::from(xc), yv))
+                            //.flat_map(|(x, yc)| <T as ArrayOps<T>>::$fn( Array::<T>::from(x), yc))
                             .collect();
                         y.shape = x.shape
                     } else {
@@ -291,7 +295,7 @@ macro_rules! impl_arr_op {
 
         impl_arr_prim_op!($name, $fn, i64, f64, u8, u16, u32);
 
-        impl<T: $name<Output = T> + Copy> $name<T> for Array<T> {
+        impl<T: $name<Output = T> + Copy + GenericVal> $name<T> for Array<T> {
             type Output = Self;
             fn $fn(self, y: T) -> Self::Output {
                 Array {

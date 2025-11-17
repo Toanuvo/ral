@@ -1,17 +1,23 @@
 use core::panic;
 use std::{fmt::Debug, iter::{once, repeat, zip}, ops::{self, Index, Mul, Range, RangeBounds, ShlAssign}, process::id, usize, vec};
+use std::mem::{Discriminant, discriminant};
 
-use crate::{Val, Array, Result, ALError};
+use crate::{ALError, Array, GenericVal, Result, Val};
 use itertools::{repeat_n, Itertools};
 use nix::libc::group;
 use num::{abs, iter::{self}, Float};
 use Val::*;
 
 
-pub trait Shape {
+pub trait Shape where Self: Sized{
     fn shape_mon(y: Val) -> Val;
     fn shape_ref(&self) -> &Vec<u32>;
     fn shape_dyd(x: Val, y: Val) -> Val;
+
+
+    fn join(self, y: Self) -> Result<Self>;
+    fn pair(self, y: Self) -> Self;
+    fn couple(self, y: Self) -> Result<Self>;
 
     fn first(self) -> Self;
     fn last(self) -> Self;
@@ -25,11 +31,12 @@ pub trait Shape {
     fn pick(self, y: Val) -> Self;
 }
 
+
 pub trait Select where Self: Sized {
     fn group(self, y:Self) -> Result<Self>;
 }
 
-fn  index<T: Into<Val> + Clone>(Array { data, shape }: &Array<T>, idx: usize, cells: bool) -> Val 
+fn  index<T: GenericVal>(Array { data, shape }: &Array<T>, idx: usize, cells: bool) -> Val 
 where Array<T>: Into<Val>
 {
     if cells {
@@ -49,7 +56,7 @@ where Array<T>: Into<Val>
     }
 }
 
-fn  pick<T: Into<Val> + Clone>(Array { data, shape }: &Array<T>, idx: Vec<i64>) -> Val 
+fn  pick<T: GenericVal>(Array { data, shape }: &Array<T>, idx: Vec<i64>) -> Val 
 where Array<T>: Into<Val> 
 {
     if shape.len() != idx.len() {
@@ -71,7 +78,7 @@ where Array<T>: Into<Val>
     data[i as usize].clone().into()
 }
 
-fn  select<T: Into<Val> + Clone>(a: Array<T>, idx: Array<i64>) -> Val 
+fn  select<T: GenericVal>(a: Array<T>, idx: Array<i64>) -> Val 
 where Array<T>: Into<Val> 
 {
     if a.shape.len() == 1 && idx.shape.len() == 1 && idx.shape[0] == 1 {
@@ -94,7 +101,7 @@ where Array<T>: Into<Val>
     }.into()
 }
 
-fn  take<T: Into<Val> + Clone + Default>(Array { data, shape }: Array<T>, v: Vec<i64>) -> Val 
+fn  take<T: GenericVal + Default>(Array { data, shape }: Array<T>, v: Vec<i64>) -> Val 
 where Array<T>: Into<Val> 
 {
     if let [i] = v[..] {
@@ -134,9 +141,29 @@ where Array<T>: Into<Val>
     }
 }
 
-fn  drop<T: Into<Val> + Clone + Default>(Array { data, shape }: Array<T>, v: Vec<i64>) -> Val 
-where Array<T>: Into<Val> 
-{
+fn  append<T: GenericVal + TryFrom<Val, Error = Val> +  Default>(mut x: Array<T>, y: Val) -> Val 
+where Array<T>: Into<Val> {
+
+
+
+    match y.try_into() {
+        Ok(y) => {
+            x.data.push(y);
+            x.into()
+        },
+        Err(y) => Array {
+            data: x.data
+                .into_iter()
+                .map_into::<Val>()
+                .chain(once(y))
+                .collect_vec(),
+            shape: x.shape
+        }.into()
+    }
+}
+
+fn  drop<T: GenericVal + Default>(Array { data, shape }: Array<T>, v: Vec<i64>) -> Val 
+where Array<T>: Into<Val> {
     if let [i] = v[..] {
         let l = shape[0] as i64;
         let step = if shape.len() == 1 { 1 } 
@@ -258,7 +285,7 @@ impl Shape for Val {
             IntArr(x) => match y {
                 IntArr(a) => select(a, x),
                 FloatArr(a) => select(a, x),
-                _ => panic!("nyi"),
+                _ => panic!("nyi: {:?}", y),
             },
             ValArr(x) => panic!("nyi"),
             _ => panic!("cannot select using {self:?}"),
@@ -341,6 +368,76 @@ impl Shape for Val {
         }
     }
 
+    fn join(self, y: Self) -> Result<Self> {
+        let xr = self.shape_ref().len();
+        let yr = y.shape_ref().len();
+
+        let c = xr.max(yr);
+        if c != 0 && (c-xr > 1 || c - yr > 1) {
+            return ALError::as_Type(format!("cannot join arrays with different ranks {:?} {:?}", xr, yr));
+        }
+
+        if discriminant(&self) == discriminant(&y) {
+            fn join_atoms<T: GenericVal + Into<Array<T>> + TryFrom<Val>>(x: T, y: Val) -> Result<Array<T>> {
+                let x: Array<T> = x.into();
+                let y = T::try_from(y).unwrap_or_else(|_| panic!("val tags should not differ"));
+                x.join(y.into())
+            }
+            match self {
+                Int(x) => join_atoms(x, y).map(Val::from),
+                Float(x) => join_atoms(x, y).map(Val::from),
+                AsciiArr(x) => x.join(y.try_into().unwrap()).map(Val::from) ,
+                IntArr(x) => x.join(y.try_into().unwrap()).map(Val::from) ,
+                FloatArr(x) => x.join(y.try_into().unwrap()).map(Val::from) ,
+                _ => panic!("todo: {:?}", self),
+            }
+        } else if let Val::ValArr(x) = self {
+            match y {
+                 IntArr(y) => x.join(y.cast()).map(Val::from),
+                 FloatArr(y) => x.join(y.cast()).map(Val::from),
+                AsciiArr(y) => x.join(y.cast()).map(Val::from),
+                Int(y) => x.join(Array::<i64>::from(y).cast()).map(Val::from),
+                Float(y) => x.join(Array::<f64>::from(y).cast()).map(Val::from),
+                y => panic!("nyi: {:?}", x),
+            }
+        } else {
+            match self {
+                IntArr(x) => Val::join(x.cast::<Val>().into(), y),
+                AsciiArr(x) => Val::join(x.cast::<Val>().into(), y),
+                FloatArr(x) => Val::join(x.cast::<Val>().into(), y),
+                Int(x) => Val::join(Array::<i64>::from(x).cast::<Val>().into(), y),
+                Float(x) => Val::join(Array::<f64>::from(x).cast::<Val>().into(), y),
+                _ => panic!("nyi: {:?}", self),
+            }
+        }
+    }
+
+    fn couple(self, y: Self) -> Result<Self> {
+        let xs = self.shape_ref();
+        let ys = y.shape_ref();
+        if xs != ys {
+            return ALError::as_Shape(format!("couple args must have same shape: xs: {:?}, ys: {:?}", xs, ys));
+        }
+
+        match (self, y) {
+            (Int(x), Int(y)) => Ok(Array::pair(x, y).into()),
+            (Float(x), Float(y)) => Ok(Array::pair(x, y).into()),
+            (Float(x), Int(y)) => Ok(Array::pair(x, y as f64).into()),
+            (Int(x), Float(y)) => Ok(Array::pair(x as f64, y).into()),
+            (IntArr(x), IntArr(y)) => x.couple(y).map(Val::from),
+            (FloatArr(x), FloatArr(y)) => x.couple(y).map(Val::from),
+            (x, y) => panic!("nyi: {:?} {:?}", x, y),
+        }
+        
+    }
+
+    fn pair(self, y: Self) -> Self {
+        Array {
+            data: vec![self, y],
+            shape: vec![2],
+        }.into()
+    }
+
     fn shape_dyd(x: Val, y: Val) -> Val {
         panic!("nyii");
     }
@@ -349,15 +446,17 @@ impl Shape for Val {
         // is there a better way?
         static EMPTY_SHAPE: Vec<u32> = Vec::new();
         match self {
+            ValArr(Array { data: _, shape }) | 
             IntArr(Array { data: _, shape }) | 
             AsciiArr(Array { data: _, shape }) | 
             FloatArr(Array { data: _, shape }) => {
                 shape
             },
+            Unit(v)  => v.shape_ref(),
             Int(_) | Float(_) => {
                 &EMPTY_SHAPE
             } ,
-            _ => panic!("nyi"),
+            _ => panic!("nyi: {self:?}"),
         }
     }
 
@@ -377,6 +476,8 @@ impl Shape for Val {
         }
     }
 }
+
+
 
 pub trait Length {
     fn length_mon(y: Val) -> Val;
